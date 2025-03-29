@@ -1,73 +1,46 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
+import { AutoRouter, cors, json } from 'itty-router';
+import { fetchGitRefs } from './gitMeta';
+import { getGitlabReposPageCount, fetchGitlabReposMany } from './gitlabRepo';
 
-import git from 'isomorphic-git';
-import http from 'isomorphic-git/http/web';
+const { preflight, corsify } = cors();
+const router = AutoRouter({
+	before: [preflight], // <-- put preflight upstream
+	finally: [corsify], // <-- put corsify downstream
+});
 
-type Ref = {
-	ref: string;
-	oid: string;
-};
+router.get('/git/refs', fetchGitRefs);
+router.get('/gitlab/repos', fetchGitlabReposMany);
+router.get('/gitlab/repos/count', getGitlabReposPageCount);
+
+router.all(
+	'*',
+	() =>
+		new Response(
+			JSON.stringify({
+				error: 'Not Found',
+				apis: router.routes.map((route) => ({
+					method: route[0],
+					path: route[3],
+				})),
+			}),
+			{
+				status: 404,
+				headers: { 'Content-Type': 'application/json' },
+			}
+		)
+);
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		const url = new URL(request.url);
-		const gitUrls = url.searchParams.getAll('url');
-		const prefix = url.searchParams.get('prefix') || 'refs/tags/';
-		const AllRefs: Record<string, Ref[]> = {};
-		const AllErrs: Record<string, string> = {};
-		if (gitUrls.length === 0) {
-			return new Response(JSON.stringify({ error: 'Missing required parameter "url"' }), {
-				status: 400,
-				headers: { 'Content-Type': 'application/json' },
-			});
-		}
-		if (gitUrls.length >= 10) {
-			return new Response(JSON.stringify({ error: 'Too many URLs provided. Maximum is 10.' }), {
-				status: 400,
-				headers: { 'Content-Type': 'application/json' },
-			});
-		}
-		for (const gitUrl of gitUrls) {
-			try {
-				if (!gitUrl || !prefix) {
-					return new Response(
-						JSON.stringify({
-							error: 'Missing required parameters. Both "url" and "prefix" are required.',
-						}),
-						{
-							status: 500,
-							headers: { 'Content-Type': 'application/json' },
-						}
-					);
-				}
-				const refs = await git.listServerRefs({
-					http,
-					url: gitUrl,
-					prefix: prefix,
-					peelTags: true,
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		return router
+			.fetch(request)
+			.then(json)
+			.catch((err) => {
+				console.error(err);
+				return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+					status: 500,
+					headers: { 'Content-Type': 'application/json' },
 				});
-				AllRefs[gitUrl] = refs;
-			} catch (error) {
-				if (error instanceof Error) {
-					AllErrs[gitUrl] = error.message;
-				} else {
-					AllErrs[gitUrl] = 'An unexpected error occurred';
-				}
-			}
-		}
-		return new Response(JSON.stringify({ data: AllRefs, errors: AllErrs }), {
-			headers: { 'Content-Type': 'application/json' },
-		});
+			});
 	},
 } satisfies ExportedHandler<Env>;

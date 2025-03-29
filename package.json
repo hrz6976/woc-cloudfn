@@ -17,6 +17,7 @@
 		"wrangler": "^4.2.0"
 	},
 	"dependencies": {
-		"isomorphic-git": "^1.29.0"
+		"isomorphic-git": "^1.29.0",
+		"itty-router": "^5.0.18"
 	}
 }
